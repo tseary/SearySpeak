@@ -3,6 +3,7 @@
 #include <avr/power.h>	// TODO See https://playground.arduino.cc/Learning/ArduinoSleepCode
 #include <LowPower.h>
 #include <SdFat.h>		// Supposedly has bug fixes that draw less power than SD.h
+#include <SPI.h>
 #include "Sensors.h"
 #include "SolarCharger.h"
 
@@ -23,6 +24,10 @@ MorseTx morse(STATUS_LED_PIN);  // Use status LED to save my eyes
 MorseTx morse(BEACON_EN_PIN);
 #endif
 
+// SD card
+SdFat sd;		// File system object
+SdFile file;	// Log file
+
 /******************************************************************************
  * Setup / Initializers
  ******************************************************************************/
@@ -37,6 +42,8 @@ void setup() {
 	initializeBeacon();
 	Sensors::initialize();
 	SolarCharger::initialize();
+
+	dataLoggerSetup();
 }
 
 void initializeBeacon() {
@@ -54,20 +61,6 @@ void initializeBeacon() {
  ******************************************************************************/
 
 void loop() {
-#ifdef DEBUG
-	Serial.print("Ambient light: ");
-	Serial.println(Sensors::getAmbientLight());
-	Serial.print("Temperature: ");
-	Serial.println(Sensors::getTemperature());
-	Serial.print("Battery voltage: ");
-	Serial.println(Sensors::getLoadVoltage());
-
-	Serial.print("Charging: ");
-	Serial.println(SolarCharger::isCharging());
-	Serial.print("Charging done: ");
-	Serial.println(SolarCharger::isChargingDone());
-#endif
-
 #ifdef DEBUG
 	morse.write(SEARYSPEAK_URL);
 #endif
@@ -93,8 +86,28 @@ void loop() {
  * Test Methods
  ******************************************************************************/
 
+void dataLoggerSetup() {
+
+}
+
 void dataLoggerLoop() {
-	// TODO
+	// TODO Write these readings to uSD card (copy from dataLogger example)
+#ifdef DEBUG
+	Serial.print("Ambient light: ");
+	Serial.println(Sensors::getAmbientLight());
+	Serial.print("Temperature: ");
+	Serial.println(Sensors::getTemperature());
+	Serial.print("Battery voltage: ");
+	Serial.println(Sensors::getLoadVoltage());
+
+	Serial.print("Charging: ");
+	Serial.println(SolarCharger::isCharging());
+	Serial.print("Charging done: ");
+	Serial.println(SolarCharger::isChargingDone());
+#endif
+
+	// Enter power down state for 8 s with ADC and BOD module disabled
+	LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
 }
 
 /******************************************************************************
