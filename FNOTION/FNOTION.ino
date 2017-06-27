@@ -86,7 +86,91 @@ void loop() {
  * Test Methods
  ******************************************************************************/
 
+#define FILE_BASE_NAME "Data"
+
+ // TODO clean up all of this
 void dataLoggerSetup() {
+
+	const uint8_t BASE_NAME_SIZE = sizeof(FILE_BASE_NAME) - 1;
+	char fileName[13] = FILE_BASE_NAME "00.csv";	// Make 8.3 name
+
+	if (BASE_NAME_SIZE > 6) {
+		error("FILE_BASE_NAME too long");
+	}
+
+
+	// Wait for USB Serial 
+	/*Serial.begin(9600);
+	while (!Serial) {
+		SysCall::yield();
+	}
+	delay(1000);
+
+	Serial.println(F("Type any character to start"));
+	while (!Serial.available()) {
+		SysCall::yield();
+	}*/
+
+	// Initialize at the highest speed supported by the board that is
+	// not over 50 MHz. Try a lower speed if SPI errors occur.
+	if (!sd.begin(SD_SS_PIN, SD_SCK_MHZ(50))) {
+		sd.initErrorHalt();	// TODO See if there are other sd.init() options
+	}
+
+	// Find an unused file name.
+	while (sd.exists(fileName)) {
+		if (fileName[BASE_NAME_SIZE + 1] != '9') {
+			fileName[BASE_NAME_SIZE + 1]++;	// Increment 1's place
+		} else if (fileName[BASE_NAME_SIZE] != '9') {
+			fileName[BASE_NAME_SIZE + 1] = '0';	// Carry 1's place
+			fileName[BASE_NAME_SIZE]++;		// Increment 10's place
+		} else {
+			//error("Can't create file name");
+		}
+	}
+	if (!file.open(fileName, O_CREAT | O_WRITE | O_EXCL)) {
+		error("file.open");
+	}
+	// Read any Serial data.
+	do {
+		delay(10);
+	} while (Serial.available() && Serial.read() >= 0);
+
+	Serial.print(F("Logging to: "));
+	Serial.println(fileName);
+	Serial.println(F("Type any character to stop"));
+
+	// Write data header.
+	
+
+
+
+
+
+	file.print(F("micros"));
+	for (uint8_t i = 0; i < ANALOG_COUNT; i++) {
+		file.print(F(",adc"));
+		file.print(i, DEC);
+	}
+	file.println();
+
+
+
+
+
+	// Start on a multiple of the sample interval.
+	logTime = micros() / (1000UL * SAMPLE_INTERVAL_MS) + 1;
+	logTime *= 1000UL * SAMPLE_INTERVAL_MS;
+
+
+
+
+
+
+
+
+
+
 
 }
 
@@ -106,6 +190,24 @@ void dataLoggerLoop() {
 	Serial.println(SolarCharger::isChargingDone());
 #endif
 
+
+
+
+
+	// TODO bring in function contents
+	logData();
+
+	// Force data to SD and update the directory entry to avoid data loss.
+	// file.sync() is like close and open, but more efficient
+	// TODO How to make robust error recovery?
+	if (!file.sync() || file.getWriteError()) {
+		//error("write error");
+		digitalWrite(STATUS_LED_PIN, HIGH);
+	}
+
+
+
+
 	// Enter power down state for 8 s with ADC and BOD module disabled
 	LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
 }
@@ -113,3 +215,7 @@ void dataLoggerLoop() {
 /******************************************************************************
 * Utility Methods
 ******************************************************************************/
+
+// TODO Define error flags in EEPROM
+// TODO Make diagnostic serial command interface
+// TODO Make uptime counter and other metering
