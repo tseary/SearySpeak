@@ -127,15 +127,15 @@ void dataLoggerSetup() {
 
 void dataLoggerLoop() {
 	// Read all sensors first to avoid SD write latency between readings
-	uint16_t ambientLight = Sensors::getAmbientLight(),	// Sensor reads take > 1 ms
-		temperature = Sensors::getTemperature(),
+	uint16_t ambientLight = Sensors::getAmbientLight();	// Sensor reads take > 1 ms
+	float temperature = Sensors::getTemperature(),
 		loadVoltage = Sensors::getLoadVoltage();
-
 	bool charging = SolarCharger::isCharging(),
 		chargingDone = SolarCharger::isChargingDone();
 
 	// Data file delimiter
 	const char CSV_DELIMITER = ',';
+	const int VOLTAGE_DIGITS = 3;
 
 	// TODO Write these readings to uSD card (copy from dataLogger example)
 #ifdef DEBUG
@@ -144,7 +144,7 @@ void dataLoggerLoop() {
 	Serial.print("Temperature: ");
 	Serial.println(temperature);
 	Serial.print("Battery voltage: ");
-	Serial.println(loadVoltage);
+	Serial.println(loadVoltage, VOLTAGE_DIGITS);
 
 	Serial.print("Charging: ");
 	Serial.println(charging);
@@ -161,7 +161,7 @@ void dataLoggerLoop() {
 	file.write(CSV_DELIMITER);
 	file.print(temperature);
 	file.write(CSV_DELIMITER);
-	file.print(loadVoltage);
+	file.print(loadVoltage, VOLTAGE_DIGITS);
 
 	// Write charging information
 	file.write(CSV_DELIMITER);
