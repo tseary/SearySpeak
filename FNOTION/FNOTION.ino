@@ -1,9 +1,10 @@
 
 #include <MorseTx.h>
-#include <avr/power.h>	// TODO See https://playground.arduino.cc/Learning/ArduinoSleepCode
+//#include <avr/power.h>	// TODO See https://playground.arduino.cc/Learning/ArduinoSleepCode
 #include <LowPower.h>
 #include <SdFat.h>		// Supposedly has bug fixes that draw less power than SD.h
 #include <SPI.h>
+#include "Diagnostics.h"
 #include "Sensors.h"
 #include "SolarCharger.h"
 
@@ -61,9 +62,9 @@ void initializeBeacon() {
  ******************************************************************************/
 
 void loop() {
-#ifdef DEBUG
+/*#ifdef DEBUG
 	morse.write(SEARYSPEAK_URL);
-#endif
+#endif*/
 
 	// Test program
 	// Before the SearySpeak is installed at its permanent location, it will be
@@ -92,29 +93,16 @@ void loop() {
 void dataLoggerSetup() {
 
 	const uint8_t BASE_NAME_SIZE = sizeof(FILE_BASE_NAME) - 1;
-	char fileName[13] = FILE_BASE_NAME "00.csv";	// Make 8.3 name
+	char fileName[BASE_NAME_SIZE + 7] = FILE_BASE_NAME "00.csv";	// Make 8.3 name
 
 	if (BASE_NAME_SIZE > 6) {
-		error("FILE_BASE_NAME too long");
+		//error("FILE_BASE_NAME too long");
 	}
-
-
-	// Wait for USB Serial 
-	/*Serial.begin(9600);
-	while (!Serial) {
-		SysCall::yield();
-	}
-	delay(1000);
-
-	Serial.println(F("Type any character to start"));
-	while (!Serial.available()) {
-		SysCall::yield();
-	}*/
 
 	// Initialize at the highest speed supported by the board that is
 	// not over 50 MHz. Try a lower speed if SPI errors occur.
 	if (!sd.begin(SD_SS_PIN, SD_SCK_MHZ(50))) {
-		sd.initErrorHalt();	// TODO See if there are other sd.init() options
+		sd.initErrorHalt();
 	}
 
 	// Find an unused file name.
@@ -128,85 +116,69 @@ void dataLoggerSetup() {
 			//error("Can't create file name");
 		}
 	}
+
 	if (!file.open(fileName, O_CREAT | O_WRITE | O_EXCL)) {
-		error("file.open");
+		//error("file.open");
 	}
-	// Read any Serial data.
-	do {
-		delay(10);
-	} while (Serial.available() && Serial.read() >= 0);
 
-	Serial.print(F("Logging to: "));
-	Serial.println(fileName);
-	Serial.println(F("Type any character to stop"));
-
-	// Write data header.
-	
-
-
-
-
-
-	file.print(F("micros"));
-	for (uint8_t i = 0; i < ANALOG_COUNT; i++) {
-		file.print(F(",adc"));
-		file.print(i, DEC);
-	}
-	file.println();
-
-
-
-
-
-	// Start on a multiple of the sample interval.
-	logTime = micros() / (1000UL * SAMPLE_INTERVAL_MS) + 1;
-	logTime *= 1000UL * SAMPLE_INTERVAL_MS;
-
-
-
-
-
-
-
-
-
-
-
+	// Write data header
+	file.println(F("millis,light,temperature,voltage,charging,done"));
 }
 
 void dataLoggerLoop() {
+	// Read all sensors first to avoid SD write latency between readings
+	uint16_t ambientLight = Sensors::getAmbientLight(),	// Sensor reads take > 1 ms
+		temperature = Sensors::getTemperature(),
+		loadVoltage = Sensors::getLoadVoltage();
+
+	bool charging = SolarCharger::isCharging(),
+		chargingDone = SolarCharger::isChargingDone();
+
+	// Data file delimiter
+	const char CSV_DELIMITER = ',';
+
 	// TODO Write these readings to uSD card (copy from dataLogger example)
 #ifdef DEBUG
 	Serial.print("Ambient light: ");
-	Serial.println(Sensors::getAmbientLight());
+	Serial.println(ambientLight);
 	Serial.print("Temperature: ");
-	Serial.println(Sensors::getTemperature());
+	Serial.println(temperature);
 	Serial.print("Battery voltage: ");
-	Serial.println(Sensors::getLoadVoltage());
+	Serial.println(loadVoltage);
 
 	Serial.print("Charging: ");
-	Serial.println(SolarCharger::isCharging());
+	Serial.println(charging);
 	Serial.print("Charging done: ");
-	Serial.println(SolarCharger::isChargingDone());
+	Serial.println(chargingDone);
 #endif
 
+	// Write time stamp
+	file.print(millis());
 
+	// Write sensor readings
+	file.write(CSV_DELIMITER);
+	file.print(ambientLight);
+	file.write(CSV_DELIMITER);
+	file.print(temperature);
+	file.write(CSV_DELIMITER);
+	file.print(loadVoltage);
 
+	// Write charging information
+	file.write(CSV_DELIMITER);
+	file.print(charging);
+	file.write(CSV_DELIMITER);
+	file.print(chargingDone);
 
+	// Write newline
+	file.println();
 
-	// TODO bring in function contents
-	logData();
-
-	// Force data to SD and update the directory entry to avoid data loss.
+	// Force data to SD and update the directory entry to avoid data loss
 	// file.sync() is like close and open, but more efficient
 	// TODO How to make robust error recovery?
 	if (!file.sync() || file.getWriteError()) {
 		//error("write error");
-		digitalWrite(STATUS_LED_PIN, HIGH);
+		digitalWrite(STATUS_LED_PIN, HIGH);	// Error light
 	}
-
-
-
 
 	// Enter power down state for 8 s with ADC and BOD module disabled
 	LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
