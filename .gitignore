@@ -1,0 +1,10 @@
+
+*.o
+*.d
+*.hex
+*.elf
+*.xml
+*.buildinfo
+*.a
+FNOTION/__vm/*
+FNOTION/.vs/FNOTION/v14/.suo
