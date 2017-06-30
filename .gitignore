@@ -7,6 +7,4 @@
 *.buildinfo
 *.a
 FNOTION/__vm/*
-FNOTION/.vs/FNOTION/v14/.suo
-FNOTION/__vm/.FNOTION.vsarduino.h
-FNOTION/__vm/Compile.vmps.xml
+FNOTION/.vs/*
