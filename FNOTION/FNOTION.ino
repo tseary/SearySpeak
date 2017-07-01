@@ -8,8 +8,6 @@
 #include "Sensors.h"
 #include "SolarCharger.h"
 
-#define DEBUG
-
 // Pin numbers
 const byte SD_SS_PIN = 10;
 const byte BEACON_EN_PIN = 2;
@@ -19,7 +17,7 @@ const byte STATUS_LED_PIN = 4;
 #define SEARYSPEAK_URL "searyspeak.ca"
 
 // Objects
-#ifdef DEBUG
+#ifdef _DEBUG
 MorseTx morse(STATUS_LED_PIN);  // Use status LED to save my eyes
 #else
 MorseTx morse(BEACON_EN_PIN);
@@ -34,13 +32,16 @@ SdFile file;	// Log file
  ******************************************************************************/
 
 void setup() {
-#ifdef DEBUG
+
+#ifdef _DEBUG
 	Serial.begin(9600);
 	while (!Serial);
 	Serial.println("SearySpeak v1.0 - " __TIMESTAMP__);
 #endif
-
+	
 	initializeBeacon();
+
+	Diagnostics::initialize();
 	Sensors::initialize();
 	SolarCharger::initialize();
 
@@ -70,6 +71,13 @@ void loop() {
 	// Before the SearySpeak is installed at its permanent location, it will be
 	// operated as a data logger to test its various systems
 	dataLoggerLoop();
+
+	Diagnostics::updateRuntime();
+	Serial.print("Runtime:\t");
+	Serial.println(Diagnostics::getRuntime());
+	Serial.print("millis:\t");
+	Serial.println(millis());
+	Serial.println();
 
 	// Nightfall
 	// TODO Load block of names from SD card into RAM
@@ -122,7 +130,7 @@ void dataLoggerSetup() {
 	}
 
 	// Write data header
-	file.println(F("millis,light,temperature,voltage,charging,done"));
+	file.println(F("runtime,light,temperature,voltage,charging,done"));
 }
 
 void dataLoggerLoop() {
@@ -138,7 +146,7 @@ void dataLoggerLoop() {
 	const int VOLTAGE_DIGITS = 3;
 
 	// TODO Write these readings to uSD card (copy from dataLogger example)
-#ifdef DEBUG
+/*#ifdef _DEBUG
 	Serial.print("Ambient light: ");
 	Serial.println(ambientLight);
 	Serial.print("Temperature: ");
@@ -150,10 +158,10 @@ void dataLoggerLoop() {
 	Serial.println(charging);
 	Serial.print("Charging done: ");
 	Serial.println(chargingDone);
-#endif
+#endif*/
 
 	// Write time stamp
-	file.print(millis());
+	file.print(Diagnostics::getRuntime());
 
 	// Write sensor readings
 	file.write(CSV_DELIMITER);
@@ -177,11 +185,23 @@ void dataLoggerLoop() {
 	// TODO How to make robust error recovery?
 	if (!file.sync() || file.getWriteError()) {
 		//error("write error");
-		digitalWrite(STATUS_LED_PIN, HIGH);	// Error light
+		setStatusLight(true);
+		delay(1000);
+		setStatusLight(false);
 	}
 
+	// Blip (heartbeat)
+	setStatusLight(true);
+	delay(1);
+	setStatusLight(false);
+
 	// Enter power down state for 8 s with ADC and BOD module disabled
-	LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
+	Serial.flush();
+	LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);	// This also stops the millis() timer
+	Diagnostics::updateRuntime(8);
+	//LowPower.idle(SLEEP_8S, ADC_OFF,
+	//	TIMER2_ON, TIMER1_ON, TIMER0_ON,
+	//	SPI_OFF, USART0_ON, TWI_OFF);
 }
 
 /******************************************************************************
@@ -190,4 +210,7 @@ void dataLoggerLoop() {
 
 // TODO Define error flags in EEPROM
 // TODO Make diagnostic serial command interface
-// TODO Make uptime counter and other metering
+
+void setStatusLight(bool enable) {
+	digitalWrite(STATUS_LED_PIN, enable);
+}
