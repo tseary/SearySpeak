@@ -7,10 +7,10 @@
 
 class MorseTx {
 public:
-	MorseTx(byte txPin, bool activeLow = false) {
+	MorseTx(byte txPin, bool activeState = true) {
 		// Set transmit pin number
 		_txPin = txPin;
-		_activeLow = activeLow;
+		_activeState = activeState;
 
 		// Initialize pin
 		pinMode(_txPin, OUTPUT);
@@ -21,7 +21,7 @@ public:
 	void write(char c);
 
 	// Transmits a null-terminated string
-	void write(char *str);
+	void write(const char* str);
 
 	// Sets the transmission speed (8 is slow, 20 is fast)
 	void setWordsPerMinute(byte wordsPerMinute);
@@ -41,7 +41,7 @@ public:
 private:
 	// Output pin
 	byte _txPin;
-	bool _activeLow;
+	bool _activeState;
 
 	// Sends a Morse character in the form 0bLLLDDDDD
 	void sendMorse(byte morse);
@@ -54,7 +54,7 @@ private:
 	byte getMorse(char c);
 
 	void setTx(bool active) {
-		digitalWrite(_txPin, active != _activeLow);
+		digitalWrite(_txPin, active == _activeState);
 	}
 
 	// Timing units
@@ -85,7 +85,7 @@ private:
 	const byte MORSE_SPACE = 0b00000;	// Space character
 	const byte MORSE_UNKNOWN = 0b00001;	// Code for unsupported characters
 
-	// Letters A - Z
+										// Letters A - Z
 	const PROGMEM byte MORSE_LETTERS[26] = {
 		(2 << LENGTH_SHIFT) | 0b00010, // A
 		(4 << LENGTH_SHIFT) | 0b00001, // B

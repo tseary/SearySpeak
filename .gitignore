@@ -8,3 +8,4 @@
 *.a
 FNOTION/__vm/*
 FNOTION/.vs/*
+FNOTION/Copy_MorseTx_to_libraries.bat

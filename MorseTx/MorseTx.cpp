@@ -12,7 +12,7 @@ void MorseTx::setWordsPerMinute(byte wordsPerMinute) {
 	setShortFist(_shortFistUnit);
 }
 
-void MorseTx::write(char *str) {
+void MorseTx::write(const char* str) {
 	// Send each character until null is encountered
 	char c;
 	for (uint16_t i = 0; (c = str[i]) != '\0'; i++) {

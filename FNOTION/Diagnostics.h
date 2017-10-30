@@ -7,24 +7,30 @@
 
 class Diagnostics {
 public:
-	// TODO make function to count total uptime and save in EEPROM
-
 	static void initialize();
 
-	static void updateRuntime(uint32_t extraSeconds = 0);
-	static uint32_t getRuntime();
+	// Run time
+	static void updateTimes(uint32_t sleepSeconds = 0);
+	static uint32_t getRunTime();
+	static uint32_t getSleepTime();
+
+	// Lines transmitted
+	static void incrementLinesTransmitted();
+	static uint32_t getLinesTransmitted();
 
 private:
 	Diagnostics() {}
 
-	static uint32_t _lastRuntimeSeconds;
+	// Runtime
+	static uint32_t _lastRunTimeSeconds;	// The total program run time (awake and asleep)
+	static uint32_t _lastSleepTimeSeconds;	// The time spent sleeping
 	static uint32_t _lastUpdateMillis;
 
-	static const uint16_t EEPROM_RUNTIME_DEBUG = 6;	// uint32_t
-	static const uint16_t EEPROM_RUNTIME_RELEASE = 10;	// uint32_t
-#ifdef _DEBUG
-	static const uint16_t EEPROM_RUNTIME = EEPROM_RUNTIME_DEBUG;	// uint32_t
-#else
-	static const uint16_t EEPROM_RUNTIME = EEPROM_RUNTIME_RELEASE;	// uint32_t
-#endif
+	// Lines transmitted
+	static uint32_t _linesTransmitted;
+
+	// EEPROM addresses
+	static const int EEPROM_RUN_TIME = 6;	// uint32_t
+	static const int EEPROM_SLEEP_TIME = 10;	// uint32_t
+	static const int EEPROM_LINES_TRANSMITTED = 14;	// uint32_t
 };

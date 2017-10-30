@@ -8,19 +8,24 @@
 #include "Sensors.h"
 #include "SolarCharger.h"
 
+// Comment/uncomment to change program behaviour
+//#define REDUCE_BRIGHTNESS;
+//#define TRANSMIT_ON_STATUS_LED;
+
 // Pin numbers
 const byte SD_SS_PIN = 10;
 const byte BEACON_EN_PIN = 2;
 const byte IADJ_PWM_PIN = 3;
 const byte STATUS_LED_PIN = 4;
 
-#define SEARYSPEAK_URL "searyspeak.ca"
+const char* SEARYSPEAK_URL = "searyspeak.ca";
+const char* FIRMWARE_VERSION = "SearySpeak v1.0 - " __TIMESTAMP__;
 
 // Objects
-#ifdef _DEBUG
+#ifdef TRANSMIT_ON_STATUS_LED
 MorseTx morse(STATUS_LED_PIN);  // Use status LED to save my eyes
 #else
-MorseTx morse(BEACON_EN_PIN);
+MorseTx morse(BEACON_EN_PIN, false);
 #endif
 
 // SD card
@@ -29,25 +34,31 @@ const char* MORSE_FILE_NAME = "Transmit.txt";
 File morseFile;	// Morse code file	TODO Figure out how to use SdFile for both
 SdFile logFile;	// Log file
 
+// Buffer for transmit string
+const uint16_t LINE_BUFFER_LENGTH = 100;
+char transmitLine[LINE_BUFFER_LENGTH];
+
+const uint32_t BAUD_RATE = 250000;
+
 /******************************************************************************
  * Setup / Initializers
  ******************************************************************************/
 
 void setup() {
+	Serial.begin(BAUD_RATE);
+	Serial.println(FIRMWARE_VERSION);
 
-#ifdef _DEBUG
-	Serial.begin(9600);
-	while (!Serial.available());
-	Serial.println("SearySpeak v1.0 - " __TIMESTAMP__);
-#endif
+	pinMode(STATUS_LED_PIN, OUTPUT);
+	setStatusLight(true);
+	delay(1000);
+	setStatusLight(false);
 
 	initializeBeacon();
+	initializeSD();
 
 	Diagnostics::initialize();
 	Sensors::initialize();
 	SolarCharger::initialize();
-
-	initializeSD();
 
 	// Open morse code file
 	// TODO If morse file doesn't exist, create it with readme comments
@@ -56,6 +67,7 @@ void setup() {
 		//error("file.open");
 		Serial.print("Error opening morse file: ");
 		Serial.println(MORSE_FILE_NAME);
+		errorFlash(8);
 	}
 
 	dataLoggerSetup();
@@ -63,8 +75,12 @@ void setup() {
 
 void initializeBeacon() {
   // Analog LED current reduction
+#ifdef REDUCE_BRIGHTNESS
+	analogWrite(IADJ_PWM_PIN, 168);		// Partial brightness
+#else
 	pinMode(IADJ_PWM_PIN, OUTPUT);
-	digitalWrite(IADJ_PWM_PIN, LOW);  // Full brightness
+	digitalWrite(IADJ_PWM_PIN, LOW);	// Full brightness
+#endif
 
 	// Set transmit timing parameters
 	morse.setWordsPerMinute(8);
@@ -93,7 +109,7 @@ void loop() {
 	// operated as a data logger to test its various systems
 	dataLoggerLoop();
 
-	Diagnostics::updateRuntime();
+	Diagnostics::updateTimes();
 
 	/*Serial.print("Runtime:\t");
 	Serial.println(Diagnostics::getRuntime());
@@ -102,17 +118,55 @@ void loop() {
 	Serial.println();*/
 
 	// Nightfall
-	// TODO Load one line from SD card into RAM
-	const uint16_t LINE_LENGTH = 100;
-	static char transmitLine[LINE_LENGTH];
-	int readReturn = csvReadText(&morseFile, transmitLine, LINE_LENGTH, '\n');
+	// Load one line from SD card into RAM
+	// TODO Ignore blank and comment lines
+	int readReturn = csvReadText(&morseFile, transmitLine, LINE_BUFFER_LENGTH, '\n');
+#ifdef _DEBUG
 	Serial.print(readReturn);
 	Serial.print('\t');
 	if (readReturn >= 0) {
 		Serial.println(transmitLine);
 	}
+#endif
 
-	// TODO Transmit names interspersed with URL
+	// Transmit the line
+	static uint8_t lineCounter = 0;	// The number of lines sent since the URL was transmitted
+	if (readReturn >= 0) {
+		// The line was read successfully
+
+		// Transmit the line
+		// e.g. "Murphy,St. John's,1600\0"
+		for (byte i = 0; i < LINE_BUFFER_LENGTH; i++) {
+			if (transmitLine[i] == '\0') {
+				break;
+			}
+			if (transmitLine[i] == ',') {
+				transmitLine[i] = '\t';
+			}
+		}
+		morse.write(transmitLine);
+		morse.write('\n');	// Delay between lines
+		Diagnostics::incrementLinesTransmitted();
+		lineCounter++;
+
+		// Rewind if the end of the file was reached
+		if (readReturn == '\0') {
+			morseFile.rewind();
+		}
+	} else if (readReturn == -1) {
+		// Read error
+	} else {
+		// Entry too long
+		// TODO Allocate a longer char*, attempt to append the rest of the line
+	}
+
+	// Transmit URL every few lines
+	const byte LINES_PER_URL = 3;
+	if (lineCounter >= LINES_PER_URL) {
+		morse.write(SEARYSPEAK_URL);
+		morse.write('\n');	// Delay between lines
+		lineCounter = 0;
+	}
 
 	// TODO Shut down after const number of names or amount of time (~1 hour)
 
@@ -121,36 +175,64 @@ void loop() {
 	// TODO Detect next nightfall by millis() and light sensor
 }
 
+// TODO Make diagnostic serial command interface
+void serialEvent() {
+	while (Serial.available()) {
+		char commandChar = Serial.read();
+		Serial.println(commandChar);
+		switch (commandChar) {
+		case 'D':	// Diagnostics
+			printDiagnostics();
+			break;
+		case 'M':	// Mount SD card
+			// TODO Start the SD card
+			break;
+		case 'U':	// Unmount SD card
+			// TODO Stop the SD card
+			break;
+		case 'S':	// Deep sleep
+			powerDownUntilCharge();
+			break;
+		}
+	}
+}
+
 /******************************************************************************
  * Test Methods
  ******************************************************************************/
 
-#define FILE_BASE_NAME "Data"
+#define FILE_NAME_BASE "Data"
+#define FILE_NAME_DEFAULT FILE_NAME_BASE "0000.csv"
 
  // TODO clean up all of this
 void dataLoggerSetup() {
 	// Create file name
-	const uint8_t BASE_NAME_SIZE = sizeof(FILE_BASE_NAME) - 1;
-	char fileName[BASE_NAME_SIZE + 7] = FILE_BASE_NAME "00.csv";	// Make 8.3 name
+	char fileName[] = FILE_NAME_DEFAULT;
 
-	if (BASE_NAME_SIZE > 6) {
-		//error("FILE_BASE_NAME too long");
-	}
-
-	// Find an unused file name.
+	// Find an unused file name
+	const uint8_t BASE_NAME_SIZE = sizeof(FILE_NAME_BASE) - 1;
+	const uint8_t TENS_PLACE = BASE_NAME_SIZE + 2;
+	const uint8_t ONES_PLACE = BASE_NAME_SIZE + 3;
 	while (sdFat.exists(fileName)) {
-		if (fileName[BASE_NAME_SIZE + 1] != '9') {
-			fileName[BASE_NAME_SIZE + 1]++;	// Increment 1's place
+		if (fileName[ONES_PLACE] != '9') {
+			fileName[ONES_PLACE]++;	// Increment 1's place
 		} else if (fileName[BASE_NAME_SIZE] != '9') {
-			fileName[BASE_NAME_SIZE + 1] = '0';	// Carry 1's place
-			fileName[BASE_NAME_SIZE]++;		// Increment 10's place
+			fileName[ONES_PLACE] = '0';	// Carry 1's place
+			fileName[TENS_PLACE]++;		// Increment 10's place
 		} else {
-			//error("Can't create file name");
+			Serial.println("Can't create numbered file name");
+			fileName[TENS_PLACE] = 'X';	// Clear 10's place
+			fileName[ONES_PLACE] = 'X';	// Clear 1's place
+			break;
 		}
 	}
 
+	Serial.print("Logging to file: ");
+	Serial.println(fileName);
+
 	if (!logFile.open(fileName, O_CREAT | O_WRITE | O_EXCL)) {
-		//error("file.open");
+		Serial.println("file.open failed");
+		return;
 	}
 
 	// Write data header
@@ -170,22 +252,22 @@ void dataLoggerLoop() {
 	const int VOLTAGE_DIGITS = 3;
 
 	// TODO Write these readings to uSD card (copy from dataLogger example)
-/*#ifdef _DEBUG
-	Serial.print("Ambient light: ");
+#ifdef _DEBUG
+	/*Serial.print("Ambient light: ");
 	Serial.println(ambientLight);
 	Serial.print("Temperature: ");
-	Serial.println(temperature);
+	Serial.println(temperature);*/
 	Serial.print("Battery voltage: ");
 	Serial.println(loadVoltage, VOLTAGE_DIGITS);
 
-	Serial.print("Charging: ");
+	/*Serial.print("Charging: ");
 	Serial.println(charging);
 	Serial.print("Charging done: ");
-	Serial.println(chargingDone);
-#endif*/
+	Serial.println(chargingDone);*/
+#endif
 
 	// Write time stamp
-	logFile.print(Diagnostics::getRuntime());
+	logFile.print(Diagnostics::getRunTime());
 
 	// Write sensor readings
 	logFile.write(CSV_DELIMITER);
@@ -219,21 +301,63 @@ void dataLoggerLoop() {
 	delay(1);
 	setStatusLight(false);
 
-	// Enter power down state for 8 s with ADC and BOD module disabled
+	// Enter power down state for 8 seconds with ADC and Brown-Out Detect module disabled
 	Serial.flush();
-	LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);	// This also stops the millis() timer
-	Diagnostics::updateRuntime(8);
-	//LowPower.idle(SLEEP_8S, ADC_OFF,
-	//	TIMER2_ON, TIMER1_ON, TIMER0_ON,
-	//	SPI_OFF, USART0_ON, TWI_OFF);
+	powerDownFor8Seconds();
 }
+
+void printDiagnostics() {
+	// Print formatted run time
+	Serial.print("Run time (h:mm:ss): ");
+	printTime(Diagnostics::getRunTime());
+	Serial.println();
+
+	// Print formatted sleep time
+	Serial.print("Sleep time (h:mm:ss): ");
+	printTime(Diagnostics::getSleepTime());
+	Serial.println();
+
+	// Print lines transmitted
+	Serial.print("Lines transmitted: ");
+	Serial.println(Diagnostics::getLinesTransmitted());
+}
+
+void printTime(uint32_t timeInSeconds) {
+	// Split runtime into components
+	uint8_t seconds = timeInSeconds % 60;
+	uint8_t minutes = (timeInSeconds / 60) % 60;
+	uint8_t hours = timeInSeconds / 3600;
+
+	// Print formatted runtime
+	Serial.print(hours);
+	Serial.print(':');
+	if (minutes <= 9) {
+		Serial.print('0');
+	}
+	Serial.print(minutes);
+	Serial.print(':');
+	if (seconds <= 9) {
+		Serial.print('0');
+	}
+	Serial.print(seconds);
+}
+
 
 /******************************************************************************
 * Utility Methods
 ******************************************************************************/
 
 // TODO Define error flags in EEPROM
-// TODO Make diagnostic serial command interface
+
+void errorFlash(byte errorLevel) {
+	const uint16_t ERROR_FLASH_HALF_PERIOD = 166;
+	for (byte i = 0; i < errorLevel; i++) {
+		setStatusLight(true);
+		delay(ERROR_FLASH_HALF_PERIOD);
+		setStatusLight(false);
+		delay(ERROR_FLASH_HALF_PERIOD);
+	}
+}
 
 void setStatusLight(bool enable) {
 	digitalWrite(STATUS_LED_PIN, enable);
@@ -244,7 +368,7 @@ void setStatusLight(bool enable) {
 // maxSize is the size of str including terminating null.
 // delim is typically ',' (default) but can be any char.
 // Returns:
-// 0 if end of file
+// '\0' if end of file
 // -1 if read error
 // -2 if overflow (entry too long)
 // delimiter if successful (delim or '\n')
@@ -255,7 +379,7 @@ int csvReadText(File* file, char* str, uint16_t maxSize, char delim /*= ','*/) {
 	while (true) {
 		// Check for end of file
 		if (!file->available()) {
-			rtn = 0;
+			rtn = '\0';
 			break;
 		}
 
@@ -271,7 +395,7 @@ int csvReadText(File* file, char* str, uint16_t maxSize, char delim /*= ','*/) {
 			break;
 		}
 
-		// Delete CR
+		// Skip CR
 		if (c == '\r') {
 			continue;
 		}
@@ -287,4 +411,39 @@ int csvReadText(File* file, char* str, uint16_t maxSize, char delim /*= ','*/) {
 	}
 	str[n] = '\0';	// Terminate string
 	return rtn;
+}
+
+void powerDownUntilCharge() {
+	// Turn everything off
+	Serial.println("Powering down until battery charging resumes.");
+	Serial.flush();
+	Serial.end();
+	setStatusLight(false);
+
+	// Sleep until we are not charging/done
+	while (SolarCharger::isCharging() || SolarCharger::isChargingDone()) {
+		powerDownFor8Seconds();
+	}
+
+	// Sleep while we are not charging/done
+	while (!SolarCharger::isCharging() && !SolarCharger::isChargingDone()) {
+		powerDownFor8Seconds();
+	}
+
+	// Start up
+	Serial.begin(BAUD_RATE);
+	Serial.println(FIRMWARE_VERSION);
+
+	setStatusLight(true);
+	delay(1000);
+	setStatusLight(false);
+}
+
+// Enters power down state for 8 seconds with ADC and Brown-Out Detect module disabled
+void powerDownFor8Seconds() {
+	LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);	// This also pauses the millis() timer
+	Diagnostics::updateTimes(8);
+	//LowPower.idle(SLEEP_8S, ADC_OFF,
+	//	TIMER2_ON, TIMER1_ON, TIMER0_ON,
+	//	SPI_OFF, USART0_ON, TWI_OFF);
 }
